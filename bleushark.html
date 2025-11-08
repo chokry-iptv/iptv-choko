@@ -1,0 +1,1227 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sharkplay+ - IPTV Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
+        
+        :root {
+            --primary-color: #ff6b6b;
+            --card-dark: #1e1e1e;
+            --bg-dark: #121212;
+        }
+
+        body {
+            font-family: 'Cairo', sans-serif;
+            background-color: var(--bg-dark);
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        /* Spinner & Card Styles */
+        .spinner { border-top-color: var(--primary-color); animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .channel-card-hover { transition: all 0.3s ease; background-color: var(--card-dark); box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3); }
+        .channel-card-hover:hover { box-shadow: 0 0 20px rgba(255, 107, 107, 0.4); transform: translateY(-6px); }
+        /* PLAYER MODAL: تم تعديله ليظهر كصندوق كبير */
+        .player-modal { background-color: rgba(0, 0, 0, 0.95); transition: opacity 0.3s ease, visibility 0.3s ease; }
+        .player-modal.hidden { opacity: 0; visibility: hidden; }
+        .toast { animation: slideIn 0.3s ease, slideOut 0.3s ease 2.7s; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes slideOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }
+        .categories-scroll::-webkit-scrollbar { height: 6px; }
+        .categories-scroll::-webkit-scrollbar-thumb { background-color: var(--primary-color); border-radius: 3px; }
+        .categories-scroll::-webkit-scrollbar-track { background: #2c2c2c; }
+        .skeleton { background: linear-gradient(90deg, #2c2c2c 25%, #3a3a3a 50%, #2c2c2c 75%); background-size: 200% 100%; animation: loading 1.5s infinite; }
+        @keyframes loading { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    </style>
+</head>
+<body class="antialiased min-h-screen">
+    <header class="sticky top-0 z-20 bg-gray-900/95 backdrop-blur-sm shadow-2xl border-b border-red-500/50">
+        <div class="container mx-auto p-4 flex flex-row-reverse items-center justify-between">
+            <h1 class="text-3xl font-extrabold text-white">📺 Sharkplay<span class="text-red-500">+</span> Pro</h1>
+            <div class="flex items-center space-x-2 space-x-reverse">
+                <p id="authStatus" class="text-sm text-gray-400">جاري الاتصال...</p>
+                
+                <button onclick="iptvApp.logout()" id="logoutButton" class="text-red-400 hover:text-red-300 transition-colors hidden">
+                    🚪 تسجيل الخروج
+                </button>
+                <button onclick="iptvApp.setCategory('المفضلة')" id="favButton" class="text-yellow-400 hover:text-yellow-300 transition-colors hidden">
+                    ⭐ المفضلة
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div class="container mx-auto p-4 pt-8">
+        <div id="authArea" class="max-w-md mx-auto p-6 bg-gray-800 rounded-xl shadow-2xl mb-12">
+            <h2 class="text-2xl font-bold text-red-400 mb-4 text-center">🔑 إدخال كود الاشتراك</h2>
+            <input type="number" id="accessCodeInput" placeholder="أدخل الكود الرقمي" 
+                    class="w-full p-3 mb-4 bg-gray-700 text-white rounded-lg border border-gray-600 focus:ring-4 focus:ring-red-500 text-center text-lg"
+                    onkeypress="return event.key === 'Enter' ? iptvApp.handleAuth() : true">
+            <button onclick="iptvApp.handleAuth()" id="accessBtn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg transition duration-300 flex items-center justify-center">
+                <span id="authBtnText">الدخول للمحتوى</span>
+                <div id="authSpinner" class="hidden spinner w-5 h-5 border-2 border-white border-solid rounded-full border-t-transparent ml-2"></div>
+            </button>
+            <p id="authMessage" class="text-center mt-3 text-sm text-gray-400">يرجى الحصول على كود الاشتراك من الإدارة.</p>
+        </div>
+        
+        <div id="mainContent" class="hidden">
+            <section class="mb-12">
+                <h2 class="text-3xl font-bold mb-6 text-right text-red-400">📺 المسلسلات</h2>
+                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4" id="featuredSeries">
+                    <div class="skeleton rounded-xl h-64"></div>
+                    <div class="skeleton rounded-xl h-64"></div>
+                    <div class="skeleton rounded-xl h-64"></div>
+                    <div class="skeleton rounded-xl h-64"></div>
+                    <div class="skeleton rounded-xl h-64"></div>
+                    <div class="skeleton rounded-xl h-64"></div>
+                </div>
+            </section>
+
+            <section class="mb-12">
+                <h2 class="text-3xl font-bold mb-6 text-right text-red-400">🎬 الأفلام المميزة</h2>
+                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4" id="featuredMovies">
+                    <div class="skeleton rounded-xl h-64"></div>
+                    <div class="skeleton rounded-xl h-64"></div>
+                    <div class="skeleton rounded-xl h-64"></div>
+                    <div class="skeleton rounded-xl h-64"></div>
+                    <div class="skeleton rounded-xl h-64"></div>
+                    <div class="skeleton rounded-xl h-64"></div>
+                </div>
+            </section>
+
+            <section class="mb-8 space-y-6">
+                <div class="relative">
+                    <input type="text" id="searchInput" placeholder="🔍 ابحث عن قناة أو فيلم..." 
+                                class="w-full bg-gray-800 text-white p-4 rounded-full border border-gray-700 focus:ring-4 focus:ring-red-500 text-right text-lg">
+                </div>
+                
+                <div id="categoriesContainer" class="flex flex-row-reverse space-x-reverse space-x-4 overflow-x-scroll categories-scroll pb-2">
+                    <div class="skeleton w-24 h-12 rounded-full"></div>
+                    <div class="skeleton w-24 h-12 rounded-full"></div>
+                    <div class="skeleton w-24 h-12 rounded-full"></div>
+                    <div class="skeleton w-24 h-12 rounded-full"></div>
+                </div>
+                
+                <div id="channelsContainer" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+                    </div>
+
+                <div id="paginationContainer" class="mt-8 flex justify-center">
+                    </div>
+
+                <div id="loadingPlaceholder" class="flex flex-col items-center justify-center p-20 text-gray-400">
+                    <div class="spinner w-12 h-12 border-4 border-gray-600 border-solid rounded-full border-t-red-500 mb-4"></div>
+                    <p class="text-xl font-semibold mt-4">جاري تحميل البيانات...</p>
+                </div>
+                
+                <div id="noResults" class="hidden text-center p-20 text-gray-400">
+                    <p class="text-3xl">❌ لا توجد نتائج مطابقة</p>
+                    <p class="mt-4 text-lg">نرجو التأكد من كلمة البحث أو اختيار فئة مختلفة.</p>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <div id="playerModal" class="player-modal fixed inset-0 z-50 flex items-center justify-center hidden">
+        <div class="w-11/12 max-w-4xl bg-gray-900 rounded-xl p-4">
+            <h3 id="playerTitle" class="text-2xl font-bold mb-4 text-white text-right truncate">Sharkplay+</h3>
+            <div class="relative bg-black rounded-lg overflow-hidden aspect-video">
+                <video id="videoPlayer" controls class="w-full h-full" poster="https://placehold.co/800x450/121212/ff6b6b?text=جاري+التحميل...">
+                    متصفحك لا يدعم تشغيل الفيديو.
+                </video>
+                <div id="playerLoading" class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 hidden">
+                    <div class="spinner w-16 h-16 border-4 border-white border-solid rounded-full border-t-transparent"></div>
+                </div>
+            </div>
+            <div class="flex justify-between mt-4 flex-wrap space-y-2 md:space-y-0">
+                <button onclick="iptvApp.toggleFavoriteHandler(iptvApp.state.currentChannel)" id="favoriteToggleBtn" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-full transition duration-300 flex-grow md:flex-grow-0 md:mr-2">
+                    ⭐ إضافة للمفضلة
+                </button>
+                <button onclick="iptvApp.toggleFullscreen()" id="fullscreenBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-full transition duration-300 flex-grow md:flex-grow-0 md:mr-2">
+                    🖥️ تكبير الشاشة
+                </button>
+                <button onclick="iptvApp.closePlayer()" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-full transition duration-300 flex-grow md:flex-grow-0">
+                    إغلاق المشغل
+                </button>
+            </div>
+            <div id="playerError" class="mt-4 text-center text-red-400 font-semibold hidden"></div>
+        </div>
+    </div>
+
+    <div id="toastContainer" class="fixed top-2 right-2 z-50 space-y-2"></div>
+
+    <script>
+        // ==========================================================
+        // === 1. FIREBASE CONFIG & FALLBACK DATA ===
+        // ==========================================================
+        
+        // 🚨 مهم: استبدل هذه المفاتيح بمفاتيح بيئة آمنة في الإنتاج
+        const firebaseConfig = {
+            apiKey: "AIzaSyD7wBy86PFGGHTClUq9wN2J6DIWvwIXRIc",
+            authDomain: "iptv-choko.firebaseapp.com",
+            projectId: "iptv-choko",
+            storageBucket: "iptv-choko.appspot.com",
+            messagingSenderId: "799598654233",
+            appId: "1:799598654233:web:cce1ebd1cd1a8c40e30b88"
+        };
+        
+        const FALLBACK_CHANNELS = [
+            { 
+                id: 'fb_mbc2', 
+                name: 'MBC 2', 
+                category: 'أفلام', 
+                icon: '🎬', 
+                url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', 
+                logo: 'https://upload.wikimedia.org/ar/thumb/3/3f/MBC_2_2018.png/800px-MBC_2_2018.png',
+                cleanedCategories: ['أفلام'] 
+            },
+            { 
+                id: 'fb_aljazeera', 
+                name: 'قناة الجزيرة', 
+                category: 'أخبار', 
+                icon: '📰', 
+                url: 'https://live-hls-web-aje.getaj.net/AJE/index.m3u8', 
+                logo: 'https://upload.wikimedia.org/ar/thumb/3/3c/Aljazeera_Channel_Logo.svg/800px-Aljazeera_Channel_Logo.svg.png',
+                cleanedCategories: ['أخبار']
+            },
+             { 
+                id: 'fb_kids', 
+                name: 'قناة الأطفال', 
+                category: 'أطفال', 
+                icon: '🧸', 
+                url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', 
+                logo: 'https://via.placeholder.com/200x200/5E548E/ffffff?text=Kids',
+                cleanedCategories: ['أطفال']
+            },
+        ];
+        
+        const FALLBACK_MOVIES = [
+            { 
+                id: 'fb_movie1', 
+                title: 'الرحالة', 
+                description: 'فيلم مغامرات عربي', 
+                poster: 'https://via.placeholder.com/300x450/ff6b6b/ffffff?text=الرحالة', 
+                url: 'https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8', 
+                duration: 'VOD', 
+                rating: '4.5', 
+                year: '2024', 
+                category: 'أفلام VOD',
+                cleanedCategories: ['أفلام VOD']
+            },
+             { 
+                id: 'fb_movie2', 
+                title: 'العودة', 
+                description: 'فيلم درامي', 
+                poster: 'https://via.placeholder.com/300x450/3f72af/ffffff?text=العودة', 
+                url: 'https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8', 
+                duration: 'VOD', 
+                rating: '4.2', 
+                year: '2023', 
+                category: 'أفلام VOD',
+                cleanedCategories: ['أفلام VOD']
+            },
+        ];
+
+        const FALLBACK_SERIES = [
+            { 
+                id: 'fb_series1', 
+                title: 'صراع العروش', 
+                description: 'مسلسل خيال ملحمي', 
+                poster: 'https://via.placeholder.com/300x450/3f72af/ffffff?text=صراع+العروش', 
+                url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', 
+                duration: '2024', 
+                rating: '4.8', 
+                year: '2024', 
+                category: 'مسلسلات',
+                cleanedCategories: ['مسلسلات']
+            },
+            { 
+                id: 'fb_series2', 
+                title: 'الضائع', 
+                description: 'مسلسل تشويق', 
+                poster: 'https://via.placeholder.com/300x450/06d6a0/ffffff?text=الضائع', 
+                url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', 
+                duration: '2023', 
+                rating: '4.5', 
+                year: '2023', 
+                category: 'مسلسلات',
+                cleanedCategories: ['مسلسلات']
+            },
+        ];
+        
+        const ACCESS_CODE_COLLECTION = 'access_codes';
+        const USER_FAVORITES_COLLECTION = 'user_favorites';
+        const CHANNELS_COLLECTION = 'channels'; 
+        const CHANNELS_CACHE_KEY = 'iptv_channels_cache';
+
+        // ==========================================================
+        // === 2. IPTV SERVICE CLASS ===
+        // ==========================================================
+        
+        class IPTVService {
+            constructor() {
+                this.MASTER_M3U_URL = ''; 
+                this.allChannels = [];
+                this.featuredMovies = [];
+                this.featuredSeries = [];
+                this.favorites = {}; 
+                this.db = null;
+                this.accessCode = null;
+                this.isUsingFallback = false;
+                this.cacheTimestamp = null;
+                this.CACHE_EXPIRY_HOURS = 12; 
+            }
+
+            async initialize(showToast) {
+                this.showToast = showToast;
+                await this.initFirebase();
+            }
+
+            async initFirebase() {
+                try {
+                    if (!firebase.apps.length) {
+                        firebase.initializeApp(firebaseConfig);
+                    }
+                    this.db = firebase.firestore();
+                    document.getElementById('authStatus').textContent = '✅ متصل بقاعدة البيانات';
+                    return true;
+                } catch (error) {
+                    console.error("Firebase Error:", error);
+                    document.getElementById('authStatus').textContent = '❌ فشل الاتصال بقاعدة البيانات';
+                    this.showToast('فشل الاتصال بقاعدة البيانات. لن يعمل نظام المفضلة أو الأكواد.', 'error');
+                    return false;
+                }
+            }
+
+            async authenticate(code) {
+                if (!this.validateAccessCode(code)) {
+                    return false;
+                }
+
+                if (!this.db) {
+                    this.showToast('✅ تم الدخول بنجاح (وضع عدم الاتصال)', 'success');
+                    this.accessCode = code;
+                    this.isUsingFallback = true;
+                    await this.loadContent();
+                    return true;
+                }
+
+                try {
+                    const docRef = this.db.collection(ACCESS_CODE_COLLECTION).doc(code);
+                    const doc = await docRef.get();
+
+                    if (doc.exists) {
+                        const data = doc.data();
+                        
+                        if (data.active === false) {
+                            this.showToast('❌ تم إيقاف تفعيل هذا الكود من قِبل الإدارة.', 'error');
+                            return false;
+                        }
+
+                        if (data.expiry_date) {
+                            const expiryDate = data.expiry_date.toDate();
+                            const currentDate = new Date();
+
+                            if (currentDate > expiryDate) {
+                                this.showToast('❌ انتهت صلاحية هذا الكود. يرجى التجديد.', 'error');
+                                return false;
+                            }
+                            
+                            const sevenDaysInMillis = 7 * 24 * 60 * 60 * 1000;
+                            const timeRemaining = expiryDate.getTime() - currentDate.getTime();
+                            
+                            if (timeRemaining < sevenDaysInMillis) {
+                                const days = Math.ceil(timeRemaining / (1000 * 3600 * 24));
+                                this.showToast(`⚠️ سينتهي اشتراكك خلال ${days} أيام!`, 'warning');
+                            }
+                        }
+
+                        this.accessCode = code;
+                        this.isUsingFallback = false;
+                        this.showToast('✅ تم الدخول بنجاح! جاري تحميل المحتوى...', 'success');
+                        
+                        await this.loadFavorites();
+                        await this.loadContent();
+                        
+                        return true;
+                    } else {
+                        this.showToast('❌ الكود الذي أدخلته غير صحيح.', 'error');
+                        return false;
+                    }
+
+                } catch (error) {
+                    console.error("Authentication Error:", error);
+                    this.showToast('⚠️ تم الدخول بوضع عدم الاتصال بسبب خطأ في الخادم', 'warning');
+                    this.accessCode = code;
+                    this.isUsingFallback = true;
+                    await this.loadContent();
+                    return true;
+                }
+            }
+            
+            validateAccessCode(code) {
+                if (!code || code.length < 4) {
+                    this.showToast('الكود يجب أن يحتوي على 4 أرقام على الأقل', 'error');
+                    return false;
+                }
+                if (!/^\d+$/.test(code)) {
+                    this.showToast('الكود يجب أن يحتوي على أرقام فقط', 'error');
+                    return false;
+                }
+                return true;
+            }
+
+            // ==========================================================
+            // === 🚀 وظائف جلب ومعالجة البيانات ===
+            // ==========================================================
+            async loadContent() {
+                const cachedData = this.loadCache();
+
+                if (cachedData) {
+                    this.processContent(cachedData.channels);
+                    this.showToast('✅ تم تحميل المحتوى من الذاكرة المؤقتة (Cache).', 'success');
+                    this.updateCacheInBackground(); 
+                    return;
+                }
+
+                try {
+                    this.showToast('جاري تحميل القنوات من Firebase Firestore...', 'info');
+                    
+                    // 1. جلب البيانات من Firestore
+                    const snapshot = await this.db.collection(CHANNELS_COLLECTION).get();
+                    const allContent = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+                    if (allContent.length > 0) {
+                        this.processContent(allContent);
+                        this.saveCache(allContent);
+                        this.showToast(`✅ تم تحميل ${allContent.length} قناة بنجاح.`, 'success');
+                    } else {
+                        throw new Error('لا توجد قنوات في Firestore');
+                    }
+                } catch (error) {
+                    console.error('Error loading content from Firestore:', error); 
+                    this.showToast('⚠️ فشل جلب القنوات، استخدام البيانات الاحتياطية.', 'warning');
+                    this.useFallbackData();
+                }
+            }
+
+            async updateCacheInBackground() {
+                if (!this.db || this.isUsingFallback) return;
+                try {
+                    // تحديث من Firestore
+                    const snapshot = await this.db.collection(CHANNELS_COLLECTION).get();
+                    const allContent = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+                    if (allContent.length > 0) {
+                        this.processContent(allContent);
+                        this.saveCache(allContent);
+                        this.showToast('✅ تم تحديث قائمة القنوات في الخلفية.', 'info');
+                        // يجب أن نستخدم App لتحديث الواجهة، لذا ننادي الدالة العامة
+                        if (typeof iptvApp !== 'undefined') {
+                            iptvApp.renderAllContent();
+                        }
+                    }
+                } catch (error) {
+                    console.warn("Background cache update failed:", error);
+                }
+            }
+
+            loadCache() {
+                const stored = localStorage.getItem(CHANNELS_CACHE_KEY);
+                if (!stored) return null;
+
+                try {
+                    const data = JSON.parse(stored);
+                    const now = Date.now();
+                    const expiryTime = this.CACHE_EXPIRY_HOURS * 60 * 60 * 1000;
+
+                    if (now - data.timestamp < expiryTime) {
+                        return data;
+                    } else {
+                        console.log("Cache expired. Deleting.");
+                        localStorage.removeItem(CHANNELS_CACHE_KEY);
+                        return null;
+                    }
+                } catch (e) {
+                    console.error("Error parsing cache:", e);
+                    localStorage.removeItem(CHANNELS_CACHE_KEY);
+                    return null;
+                }
+            }
+
+            saveCache(channels) {
+                const dataToStore = {
+                    timestamp: Date.now(),
+                    channels: channels
+                };
+                try {
+                    localStorage.setItem(CHANNELS_CACHE_KEY, JSON.stringify(dataToStore));
+                } catch (e) {
+                    console.error("Error saving cache:", e);
+                }
+            }
+            
+            // ✅ دالة جديدة لتنظيف اسم القناة (Clean Channel Name)
+            cleanChannelName(name) {
+                if (!name || typeof name !== 'string') return '';
+                // إزالة الأجزاء التي تبدأ بـ -1 tvg-id=...
+                const match = name.match(/^-?\d+\s+tvg-id="[^"]*",?([^"]*)/);
+                if (match && match[1]) {
+                    // إرجاع الاسم النظيف بعد الفاصلة
+                    return match[1].trim();
+                }
+                // إزالة أي أرقام/رموز غير ضرورية قد تكون في البداية
+                return name.replace(/^[\s\d\-]+/, '').trim(); 
+            }
+            
+            // ✅ الدالة processContent بعد التعديل لمعالجة خطأ TypeError
+            processContent(allContent) {
+                allContent.forEach(channel => {
+                    // 1. التأكد من أن category هو سلسلة نصية (string)
+                    const categoryString = (channel.category && typeof channel.category === 'string') 
+                                           ? channel.category 
+                                           : ''; 
+
+                    // 2. معالجة الفئات النظيفة (cleanedCategories)
+                    if (categoryString.trim().length > 0) {
+                        channel.cleanedCategories = categoryString.split(/[;,]/).map(c => c.trim()).filter(c => c.length > 1);
+                    } else {
+                         channel.cleanedCategories = [];
+                    }
+                    
+                    // 3. إنشاء خاصية جديدةcategoryString.toLowerCase() للمقارنات
+                    channel.categoryString = categoryString.toLowerCase(); 
+                    
+                    // 4. تنظيف الاسم للاستخدامات اللاحقة
+                    channel.name = this.cleanChannelName(channel.name || channel.title);
+                });
+
+                // 4. استخدام الخاصية categoryString الجديدة للمقارنة (بدلاً من c.category?.toLowerCase())
+                const liveChannels = allContent.filter(c => 
+                    !c.categoryString.includes('vod') && 
+                    !c.categoryString.includes('movie') && 
+                    !c.categoryString.includes('series')
+                );
+                
+                const movies = allContent.filter(c => 
+                    c.categoryString.includes('أفلام') || 
+                    c.categoryString.includes('vod') || 
+                    c.categoryString.includes('movie')
+                );
+                
+                const series = allContent.filter(c => 
+                    c.categoryString.includes('مسلسلات') || 
+                    c.categoryString.includes('series')
+                );
+                
+                this.allChannels = liveChannels.concat(movies).concat(series);
+                
+                this.featuredMovies = this.prepareContentData(movies, FALLBACK_MOVIES).slice(0, 6);
+                this.featuredSeries = this.prepareContentData(series, FALLBACK_SERIES).slice(0, 6);
+            }
+
+            useFallbackData() {
+                this.allChannels = FALLBACK_CHANNELS.concat(FALLBACK_MOVIES).concat(FALLBACK_SERIES);
+                this.allChannels.forEach(channel => {
+                    if (!channel.cleanedCategories) {
+                        channel.cleanedCategories = channel.category ? [channel.category] : [];
+                    }
+                    // إضافة categoryString للبيانات الاحتياطية أيضاً
+                    channel.categoryString = channel.category ? channel.category.toLowerCase() : '';
+                    channel.name = this.cleanChannelName(channel.name || channel.title);
+                });
+                this.featuredMovies = FALLBACK_MOVIES;
+                this.featuredSeries = FALLBACK_SERIES;
+                this.isUsingFallback = true;
+            }
+
+            prepareContentData(list, fallbackList) {
+                if (list.length === 0) return fallbackList;
+                return list.map((c, index) => ({
+                    id: c.id,
+                    title: c.name || c.title, // يدعم حقل name و title (النظيف الآن)
+                    description: c.category || 'محتوى فيديو عند الطلب.',
+                    poster: c.logo || c.poster || this.generatePlaceholder(c.name || c.title, c.category), // يدعم poster و logo
+                    url: c.url,
+                    duration: c.duration || 'VOD',
+                    rating: c.rating || '5.0',
+                    year: c.year || 'جديد',
+                    category: c.category,
+                    cleanedCategories: c.cleanedCategories 
+                }));
+            }
+
+            // ✅ دالة generatePlaceholder مُعدَّلة
+            generatePlaceholder(name, category) {
+                // استخدام دالة التنظيف
+                const cleanedName = this.cleanChannelName(name); 
+
+                if (!cleanedName || typeof cleanedName !== 'string' || cleanedName.trim() === '') {
+                    // إذا لم يوجد اسم، نستخدم placeholder ثابت
+                    return `https://via.placeholder.com/300x450/424242/ffffff?text=عنوان+غير+متوفر`;
+                }
+                
+                const colors = {
+                    'أفلام': 'ff6b6b',
+                    'مسلسلات': '3f72af', 
+                    'أخبار': '06d6a0',
+                    'رياض': 'ff9f1c',
+                    'أطفال': '5E548E',
+                    'default': '3f72af'
+                };
+                const categoryLower = category ? (typeof category === 'string' ? category.toLowerCase() : 'default') : 'default';
+                let color = colors.default;
+
+                for (const key in colors) {
+                    if (categoryLower.includes(key)) {
+                        color = colors[key];
+                        break;
+                    }
+                }
+
+                // نستخدم أول كلمتين فقط لضمان عدم تجاوز طول عنوان Placeholder
+                const placeholderText = cleanedName.split(' ').slice(0, 2).join('+');
+                // نستخدم رابط placeholder خارجي ولكن نظيف
+                return `https://via.placeholder.com/300x450/${color}/ffffff?text=${encodeURIComponent(placeholderText)}`;
+            }
+
+            getCategoryIcon(category) {
+                const categoryLower = category ? category.toLowerCase() : '';
+                
+                if (categoryLower.includes('أفلام') || categoryLower.includes('movie') || categoryLower.includes('cinema') || categoryLower.includes('film')) return '🎬';
+                if (categoryLower.includes('مسلسلات') || categoryLower.includes('series') || categoryLower.includes('tv shows')) return '🎞️';
+                if (categoryLower.includes('أخبار') || categoryLower.includes('news') || categoryLower.includes('breaking')) return '📰';
+                if (categoryLower.includes('رياض') || categoryLower.includes('sport') || categoryLower.includes('football') || categoryLower.includes('soccer')) return '⚽';
+                if (categoryLower.includes('أطفال') || categoryLower.includes('kids') || categoryLower.includes('children') || categoryLower.includes('cartoon')) return '🧸';
+                if (categoryLower.includes('وثائقي') || categoryLower.includes('documentary') || categoryLower.includes('history')) return '📜';
+                if (categoryLower.includes('موسيقى') || categoryLower.includes('music') || categoryLower.includes('radio')) return '🎵';
+                if (categoryLower.includes('دين') || categoryLower.includes('religious') || categoryLower.includes('islam')) return '🕌';
+                if (categoryLower.includes('ترفيه') || categoryLower.includes('entertainment') || categoryLower.includes('general')) return '📺';
+
+                return '🌐'; 
+            }
+
+            async loadFavorites() {
+                if (!this.db || !this.accessCode || this.isUsingFallback) return;
+                try {
+                    const doc = await this.db.collection(USER_FAVORITES_COLLECTION).doc(this.accessCode).get();
+                    if (doc.exists && doc.data().favorites) {
+                        this.favorites = doc.data().favorites;
+                    }
+                } catch (error) {
+                    console.error("Error loading favorites:", error);
+                }
+            }
+
+            async toggleFavorite(channel) {
+                if (this.isUsingFallback) {
+                    this.showToast('⚠️ وضع عدم الاتصال - لا يمكن حفظ المفضلة', 'warning');
+                    return false;
+                }
+
+                if (!this.db || !this.accessCode) {
+                    this.showToast('يرجى تسجيل الدخول أولاً.', 'error');
+                    return false;
+                }
+
+                const wasFavorite = this.isFavorite(channel.id);
+                
+                if (wasFavorite) {
+                    delete this.favorites[channel.id];
+                    this.showToast(`تمت إزالة ${channel.name || channel.title} من المفضلة.`, 'info');
+                } else {
+                    this.favorites[channel.id] = channel;
+                    this.showToast(`تمت إضافة ${channel.name || channel.title} إلى المفضلة!`, 'success');
+                }
+                
+                try {
+                    await this.db.collection(USER_FAVORITES_COLLECTION).doc(this.accessCode).set({ 
+                        favorites: this.favorites 
+                    }, { merge: true });
+                    return true;
+                } catch (error) {
+                    console.error("Error saving favorites:", error);
+                    // التراجع عن التغيير في الذاكرة المحلية
+                    if (wasFavorite) {
+                        this.favorites[channel.id] = channel;
+                    } else {
+                        delete this.favorites[channel.id];
+                    }
+                    this.showToast('فشل حفظ المفضلة.', 'error');
+                    return false;
+                }
+            }
+
+            isFavorite(channelId) {
+                return !!this.favorites[channelId];
+            }
+
+            getAllChannels() { return this.allChannels; }
+            getFeaturedMovies() { return this.featuredMovies; }
+            getFeaturedSeries() { return this.featuredSeries; } 
+            getFavoritesList() { return Object.values(this.favorites); }
+
+            searchChannels(query) {
+                const q = query.toLowerCase().trim();
+                return this.allChannels.filter(c => 
+                    (c.name && c.name.toLowerCase().includes(q)) ||
+                    (c.title && c.title.toLowerCase().includes(q)) ||
+                    (c.category && typeof c.category === 'string' && c.category.toLowerCase().includes(q))
+                );
+            }
+        }
+
+        // ==========================================================
+        // === 3. IPTV APPLICATION CLASS ===
+        // ==========================================================
+        
+        class IPTVApp {
+            constructor() {
+                this.service = new IPTVService();
+                this.state = {
+                    isAuthenticated: false,
+                    allChannels: [],
+                    currentChannels: [],
+                    currentCategory: 'الكل',
+                    searchTerm: '',
+                    channelsPerPage: 30,
+                    currentPage: 1,
+                    currentChannel: null,
+                    hls: null,
+                };
+
+                // العناصر (Elements)
+                this.elements = {
+                    authArea: document.getElementById('authArea'),
+                    mainContent: document.getElementById('mainContent'),
+                    accessCodeInput: document.getElementById('accessCodeInput'),
+                    authBtnText: document.getElementById('authBtnText'),
+                    authSpinner: document.getElementById('authSpinner'),
+                    logoutButton: document.getElementById('logoutButton'),
+                    favButton: document.getElementById('favButton'),
+                    channelsContainer: document.getElementById('channelsContainer'),
+                    categoriesContainer: document.getElementById('categoriesContainer'),
+                    searchInput: document.getElementById('searchInput'),
+                    loadingPlaceholder: document.getElementById('loadingPlaceholder'),
+                    noResults: document.getElementById('noResults'),
+                    paginationContainer: document.getElementById('paginationContainer'),
+                    playerModal: document.getElementById('playerModal'),
+                    videoPlayer: document.getElementById('videoPlayer'),
+                    playerTitle: document.getElementById('playerTitle'),
+                    playerLoading: document.getElementById('playerLoading'),
+                    favoriteToggleBtn: document.getElementById('favoriteToggleBtn'),
+                    playerError: document.getElementById('playerError'),
+                    featuredMovies: document.getElementById('featuredMovies'),
+                    featuredSeries: document.getElementById('featuredSeries'),
+                    toastContainer: document.getElementById('toastContainer'), 
+                };
+                
+                // Bindings
+                if (this.elements.searchInput) {
+                    this.elements.searchInput.addEventListener('input', () => this.handleSearch());
+                }
+                window.addEventListener('popstate', (e) => this.handlePopState(e));
+            }
+
+            // ==========================================================
+            // === AUTHENTICATION & INITIALIZATION ===
+            // ==========================================================
+
+            async init() {
+                this.showLoading(true);
+                // تمرير دالة showToast لـ IPTVService
+                await this.service.initialize(this.showToast.bind(this)); 
+                const storedCode = localStorage.getItem('accessCode');
+                if (storedCode) {
+                    if (this.elements.accessCodeInput) {
+                         this.elements.accessCodeInput.value = storedCode;
+                    }
+                    if (this.elements.authMessage) {
+                        this.elements.authMessage.textContent = 'تم العثور على كود محفوظ. جاري الدخول...';
+                    }
+                    await this.authenticateAndLoad(storedCode);
+                } else {
+                    if (this.elements.authArea) {
+                        this.elements.authArea.classList.remove('hidden');
+                    }
+                    this.showLoading(false);
+                }
+            }
+
+            async handleAuth() {
+                const code = this.elements.accessCodeInput.value.trim();
+                this.elements.authBtnText.textContent = 'جاري التحقق...';
+                this.elements.authSpinner.classList.remove('hidden');
+                this.elements.authArea.classList.add('pointer-events-none');
+
+                await this.authenticateAndLoad(code);
+
+                this.elements.authBtnText.textContent = 'الدخول للمحتوى';
+                this.elements.authSpinner.classList.add('hidden');
+                this.elements.authArea.classList.remove('pointer-events-none');
+            }
+
+            async authenticateAndLoad(code) {
+                const success = await this.service.authenticate(code);
+                
+                if (success) {
+                    localStorage.setItem('accessCode', code);
+                    this.state.isAuthenticated = true;
+                    this.elements.authArea.classList.add('hidden');
+                    this.elements.mainContent.classList.remove('hidden');
+                    this.elements.logoutButton.classList.remove('hidden');
+                    this.elements.favButton.classList.remove('hidden');
+                    
+                    this.state.allChannels = this.service.getAllChannels();
+                    this.renderAllContent();
+                    
+                } else {
+                    this.state.isAuthenticated = false;
+                    this.elements.authArea.classList.remove('hidden');
+                    this.elements.mainContent.classList.add('hidden');
+                    this.elements.logoutButton.classList.add('hidden');
+                    this.elements.favButton.classList.add('hidden');
+                    localStorage.removeItem('accessCode');
+                }
+                this.showLoading(false);
+            }
+
+            logout() {
+                localStorage.removeItem('accessCode');
+                localStorage.removeItem(CHANNELS_CACHE_KEY); 
+                location.reload(); 
+            }
+
+            // ==========================================================
+            // === RENDERING & UI ===
+            // ==========================================================
+
+            showLoading(show) {
+                if (this.elements.loadingPlaceholder) {
+                    if (show) {
+                        this.elements.loadingPlaceholder.classList.remove('hidden');
+                        this.elements.channelsContainer.classList.add('hidden');
+                    } else {
+                        this.elements.loadingPlaceholder.classList.add('hidden');
+                        if (this.state.isAuthenticated && this.elements.channelsContainer) {
+                            this.elements.channelsContainer.classList.remove('hidden');
+                        }
+                    }
+                }
+            }
+            
+            showNoResults(show) {
+                if (this.elements.noResults) {
+                    if (show) {
+                        this.elements.noResults.classList.remove('hidden');
+                        if (this.elements.channelsContainer) {
+                             this.elements.channelsContainer.innerHTML = '';
+                        }
+                    } else {
+                        this.elements.noResults.classList.add('hidden');
+                    }
+                }
+            }
+
+            renderAllContent() {
+                this.state.allChannels = this.service.getAllChannels();
+                this.renderFeatured(this.service.getFeaturedSeries(), this.elements.featuredSeries, 'series');
+                this.renderFeatured(this.service.getFeaturedMovies(), this.elements.featuredMovies, 'movie');
+                this.renderCategories();
+                this.setCategory(this.state.currentCategory);
+            }
+
+            renderFeatured(contentList, containerElement, type) {
+                if (!containerElement) return;
+
+                containerElement.innerHTML = contentList.map(item => {
+                    const cleanTitle = this.service.cleanChannelName(item.title);
+                    return `
+                        <div class="channel-card-hover rounded-xl overflow-hidden cursor-pointer" onclick="iptvApp.openPlayer('${item.url}', '${cleanTitle}')">
+                            <img src="${item.poster}" alt="${cleanTitle}" class="w-full h-40 object-cover" onerror="this.onerror=null;this.src='${this.service.generatePlaceholder(item.title, item.category)}';">
+                            <div class="p-2">
+                                <h3 class="text-white text-sm font-bold truncate">${cleanTitle}</h3>
+                                <p class="text-red-400 text-xs">${item.year || 'VOD'}</p>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                
+                if (contentList.length === 0) {
+                    containerElement.innerHTML = '<p class="text-gray-500 col-span-full text-center">لا توجد محتويات مميزة حالياً.</p>';
+                }
+            }
+
+            renderCategories() {
+                if (!this.elements.categoriesContainer) return;
+                
+                const allCategories = new Set(this.state.allChannels.flatMap(c => c.cleanedCategories));
+                const categories = ['الكل', 'المفضلة', ...Array.from(allCategories).sort()];
+                
+                this.elements.categoriesContainer.innerHTML = categories.map(cat => `
+                    <button onclick="iptvApp.setCategory('${cat}')" 
+                            class="py-2 px-4 whitespace-nowrap rounded-full font-semibold transition-colors duration-300 ${this.state.currentCategory === cat ? 'bg-red-500 text-white shadow-red-500/50 shadow-lg' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}"
+                            id="catBtn_${cat}">
+                        ${cat}
+                    </button>
+                `).join('');
+            }
+            
+            setCategory(category) {
+                this.state.currentCategory = category;
+                this.elements.categoriesContainer.querySelectorAll('button').forEach(btn => {
+                    btn.classList.remove('bg-red-500', 'text-white', 'shadow-lg');
+                    btn.classList.add('bg-gray-700', 'text-gray-300');
+                    if (btn.id === `catBtn_${category}`) {
+                         btn.classList.add('bg-red-500', 'text-white', 'shadow-lg');
+                         btn.classList.remove('bg-gray-700', 'text-gray-300');
+                    }
+                });
+                
+                this.elements.searchInput.value = '';
+                this.state.searchTerm = '';
+
+                this.filterAndRenderChannels();
+            }
+
+            filterAndRenderChannels() {
+                let filteredChannels = this.state.allChannels;
+                
+                if (this.state.currentCategory === 'المفضلة') {
+                    filteredChannels = this.service.getFavoritesList();
+                } else if (this.state.currentCategory !== 'الكل') {
+                    filteredChannels = filteredChannels.filter(c => c.cleanedCategories.includes(this.state.currentCategory));
+                }
+
+                if (this.state.searchTerm) {
+                    filteredChannels = this.service.searchChannels(this.state.searchTerm);
+                }
+
+                this.state.currentChannels = filteredChannels;
+                this.state.currentPage = 1;
+                this.renderCurrentChannels();
+            }
+
+            handleSearch() {
+                const query = this.elements.searchInput.value.trim();
+                this.state.searchTerm = query;
+                this.state.currentCategory = 'الكل'; 
+                this.filterAndRenderChannels();
+            }
+
+
+            renderCurrentChannels() {
+                if (!this.elements.channelsContainer) return;
+                
+                const { currentChannels, channelsPerPage, currentPage } = this.state;
+                
+                const totalPages = Math.ceil(currentChannels.length / channelsPerPage);
+                const startIndex = (currentPage - 1) * channelsPerPage;
+                const endIndex = startIndex + channelsPerPage;
+                const paginatedChannels = currentChannels.slice(startIndex, endIndex);
+
+                if (currentChannels.length === 0) {
+                    this.showNoResults(true);
+                    this.elements.paginationContainer.innerHTML = '';
+                    return;
+                }
+                this.showNoResults(false);
+                
+                this.elements.channelsContainer.innerHTML = paginatedChannels.map(channel => this.renderChannelCard(channel)).join('');
+                this.renderPagination(totalPages, currentPage);
+            }
+
+            renderChannelCard(channel) {
+                const isFav = this.service.isFavorite(channel.id);
+                const rawName = channel.name || channel.title || 'قناة غير معروفة';
+                
+                // ✅ استخدام دالة التنظيف لضمان ظهور اسم نظيف للمستخدم وللمشغل
+                const name = this.service.cleanChannelName(rawName);
+                
+                // استخدام الـ rawName عند توليد Placeholder لأن دالة generatePlaceholder ستقوم بالتنظيف داخليا
+                const logo = channel.logo || channel.poster || this.service.generatePlaceholder(rawName, channel.category);
+                const category = channel.category || 'متنوع';
+
+                return `
+                    <div class="channel-card-hover group rounded-xl overflow-hidden shadow-lg bg-gray-800 cursor-pointer relative" 
+                         onclick="iptvApp.openPlayer('${channel.url}', '${name}')">
+                        <div class="h-40 w-full overflow-hidden">
+                            <img src="${logo}" alt="${name}" 
+                                 class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                                 onerror="this.onerror=null;this.src='${this.service.generatePlaceholder(rawName, category)}';"
+                                 loading="lazy">
+                        </div>
+                        <div class="p-3 text-right">
+                            <h3 class="text-white text-md font-bold truncate">${name}</h3>
+                            <p class="text-red-400 text-xs">${category}</p>
+                            ${isFav ? '<span class="absolute top-2 left-2 text-yellow-400 text-xl">⭐</span>' : ''}
+                        </div>
+                    </div>
+                `;
+            }
+            
+
+            renderPagination(totalPages, currentPage) {
+                if (!this.elements.paginationContainer) return;
+                
+                let paginationHtml = '';
+                const maxPagesToShow = 5; 
+                let startPage = Math.max(1, currentPage - Math.floor(maxPagesToShow / 2));
+                let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
+
+                if (endPage - startPage + 1 < maxPagesToShow) {
+                    startPage = Math.max(1, endPage - maxPagesToShow + 1);
+                }
+
+                const renderButton = (page, text, isDisabled = false) => `
+                    <button onclick="iptvApp.goToPage(${page})"
+                            class="py-2 px-4 mx-1 rounded-lg font-semibold transition-colors duration-200 
+                                ${page === currentPage ? 'bg-red-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}
+                                ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}"
+                            ${isDisabled ? 'disabled' : ''}>
+                        ${text}
+                    </button>
+                `;
+
+                // زر السابق
+                paginationHtml += renderButton(currentPage - 1, 'السابق', currentPage === 1);
+
+                // الأزرار الرقمية
+                for (let i = startPage; i <= endPage; i++) {
+                    paginationHtml += renderButton(i, i);
+                }
+
+                // زر التالي
+                paginationHtml += renderButton(currentPage + 1, 'التالي', currentPage === totalPages);
+
+                this.elements.paginationContainer.innerHTML = paginationHtml;
+            }
+
+            goToPage(page) {
+                if (page < 1 || page > Math.ceil(this.state.currentChannels.length / this.state.channelsPerPage)) return;
+                this.state.currentPage = page;
+                this.renderCurrentChannels();
+                if (this.elements.channelsContainer) {
+                    window.scrollTo({ top: this.elements.channelsContainer.offsetTop - 100, behavior: 'smooth' });
+                }
+            }
+
+            // ==========================================================
+            // === PLAYER LOGIC ===
+            // ==========================================================
+
+            openPlayer(url, title) {
+                // ✅ التأكد من المصادقة: إذا لم تكن مصادقاً، لن يفتح المشغل
+                if (!this.state.isAuthenticated) {
+                    this.showToast('⚠️ يرجى إدخال كود الاشتراك أولاً لتشغيل المحتوى.', 'warning');
+                    return; 
+                }
+
+                // البحث عن القناة باستخدام الرابط لضمان العثور عليها
+                this.state.currentChannel = this.state.currentChannels.find(c => c.url === url) || this.service.allChannels.find(c => c.url === url);
+                
+                if (this.elements.playerTitle) {
+                    this.elements.playerTitle.textContent = title;
+                    this.elements.playerModal.classList.remove('hidden');
+                    this.elements.playerError.classList.add('hidden');
+                    this.elements.videoPlayer.src = '';
+                    this.elements.videoPlayer.pause();
+                }
+                
+                document.body.style.overflow = 'hidden';
+                
+                this.updateFavoriteButton();
+                this.playVideo(url);
+                
+                // إضافة حالة للمتصفح لدعم الإغلاق بزر العودة
+                history.pushState({ modal: 'player', url, title }, title, `#player`);
+            }
+            
+            handlePopState(e) {
+                if (!e.state || !e.state.modal) {
+                    this.closePlayer(false);
+                }
+            }
+            
+            playVideo(url) {
+                this.elements.playerLoading.classList.remove('hidden');
+                const video = this.elements.videoPlayer;
+
+                if (this.state.hls) {
+                    this.state.hls.destroy();
+                }
+
+                if (Hls.isSupported() && url.toLowerCase().includes('.m3u8')) {
+                    this.state.hls = new Hls();
+                    this.state.hls.on(Hls.Events.ERROR, (event, data) => {
+                        if (data.fatal) {
+                             console.error("HLS Fatal Error:", data);
+                             this.displayPlayerError('فشل في تشغيل البث (HLS). جاري تجربة المشغل الأصلي...');
+                             this.tryNativePlayback(video, url);
+                        }
+                    });
+                    this.state.hls.loadSource(url);
+                    this.state.hls.attachMedia(video);
+                    this.state.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                        video.play().catch(e => {
+                            console.warn("Autoplay failed:", e);
+                            this.elements.playerError.classList.remove('hidden');
+                            this.elements.playerError.textContent = '▶️ للتشغيل، يرجى النقر على زر التشغيل (Play) في المشغل.';
+                        });
+                        this.elements.playerLoading.classList.add('hidden');
+                    });
+                } else if (video.canPlayType('application/vnd.apple.mpegurl') || video.canPlayType('application/x-mpegurl') || !url.toLowerCase().includes('.m3u8')) {
+                    this.tryNativePlayback(video, url);
+                } else {
+                    this.displayPlayerError('❌ متصفحك لا يدعم تشغيل هذا النوع من البث (HLS).');
+                    this.elements.playerLoading.classList.add('hidden');
+                }
+                
+                video.addEventListener('playing', () => this.elements.playerLoading.classList.add('hidden'), { once: true });
+                video.addEventListener('waiting', () => this.elements.playerLoading.classList.remove('hidden'));
+                video.addEventListener('error', (e) => {
+                    console.error("Video Error:", e);
+                    this.displayPlayerError(`❌ حدث خطأ أثناء تشغيل الفيديو. قد يكون الرابط غير صالح.`);
+                    this.elements.playerLoading.classList.add('hidden');
+                }, { once: true });
+            }
+            
+            tryNativePlayback(video, url) {
+                video.src = url;
+                video.addEventListener('loadedmetadata', () => {
+                    video.play().catch(e => {
+                        console.warn("Native Autoplay failed:", e);
+                        this.elements.playerError.classList.remove('hidden');
+                        this.elements.playerError.textContent = '▶️ للتشغيل، يرجى النقر على زر التشغيل (Play) في المشغل.';
+                    });
+                    this.elements.playerLoading.classList.add('hidden');
+                }, { once: true });
+                video.load();
+            }
+            
+            displayPlayerError(message) {
+                 this.elements.playerError.textContent = message;
+                 this.elements.playerError.classList.remove('hidden');
+            }
+
+
+            closePlayer(shouldGoBack = true) {
+                if (this.state.hls) {
+                    this.state.hls.destroy();
+                    this.state.hls = null;
+                }
+                if (this.elements.videoPlayer) {
+                    this.elements.videoPlayer.pause();
+                    this.elements.videoPlayer.src = '';
+                }
+                if (this.elements.playerModal) {
+                    this.elements.playerModal.classList.add('hidden');
+                }
+                document.body.style.overflow = '';
+                
+                if (shouldGoBack && history.state && history.state.modal === 'player') {
+                    history.back();
+                }
+            }
+
+            toggleFullscreen() {
+                const video = this.elements.videoPlayer;
+                if (!video) return;
+                
+                if (video.requestFullscreen) {
+                    video.requestFullscreen();
+                } else if (video.webkitRequestFullscreen) { /* Safari */
+                    video.webkitRequestFullscreen();
+                } else if (video.msRequestFullscreen) { /* IE11 */
+                    video.msRequestFullscreen();
+                }
+            }
+
+            // ==========================================================
+            // === FAVORITES ===
+            // ==========================================================
+
+            async toggleFavoriteHandler(channel) {
+                if (!channel) return;
+                const success = await this.service.toggleFavorite(channel);
+                if (success) {
+                    this.updateFavoriteButton();
+                    // تحديث قائمة القنوات إذا كنا في فئة "المفضلة"
+                    if (this.state.currentCategory === 'المفضلة') {
+                        this.filterAndRenderChannels();
+                    }
+                    this.renderCurrentChannels(); 
+                }
+            }
+
+            updateFavoriteButton() {
+                if (!this.elements.favoriteToggleBtn) return;
+                
+                const isFav = this.state.currentChannel && this.service.isFavorite(this.state.currentChannel.id);
+                this.elements.favoriteToggleBtn.innerHTML = isFav ? '❌ إزالة من المفضلة' : '⭐ إضافة للمفضلة';
+                this.elements.favoriteToggleBtn.classList.toggle('bg-gray-700', !isFav);
+                this.elements.favoriteToggleBtn.classList.toggle('bg-yellow-600', isFav);
+                this.elements.favoriteToggleBtn.classList.toggle('hover:bg-yellow-700', isFav);
+                this.elements.favoriteToggleBtn.classList.toggle('hover:bg-gray-600', !isFav);
+            }
+
+            // ==========================================================
+            // === UTILS ===
+            // ==========================================================
+
+            showToast(message, type = 'info') {
+                if (!this.elements.toastContainer) {
+                    console.warn(`Toast failed: ${message}. toastContainer element not found.`);
+                    return; 
+                }
+                
+                const toast = document.createElement('div');
+                toast.className = `toast p-3 rounded-lg shadow-xl text-white flex items-center mb-2`;
+                
+                let bgColor = 'bg-gray-600'; 
+                let icon = '🔔';
+                
+                if (type === 'success') {
+                    bgColor = 'bg-green-600';
+                    icon = '✅';
+                } else if (type === 'error') {
+                    bgColor = 'bg-red-600';
+                    icon = '❌';
+                } else if (type === 'warning') {
+                    bgColor = 'bg-yellow-600';
+                    icon = '⚠️';
+                }
+                
+                toast.classList.add(bgColor);
+                toast.innerHTML = `<span class="ml-2">${icon}</span> ${message}`;
+                
+                this.elements.toastContainer.prepend(toast); 
+                
+                setTimeout(() => {
+                    toast.remove();
+                }, 3000); 
+            }
+        }
+
+        // ==========================================================
+        // === 4. INITIALIZATION SCRIPT (Fix Applied Here) ===
+        // ==========================================================
+        
+        // 🚀 التعديل الهام: يتم تأخير إنشاء الكائن iptvApp حتى يتم تحميل DOM بالكامل
+        let iptvApp;
+        document.addEventListener('DOMContentLoaded', () => {
+             iptvApp = new IPTVApp();
+             iptvApp.init();
+        });
+
+    </script>
+</body>
+</html>
