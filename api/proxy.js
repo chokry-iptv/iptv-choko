@@ -1,7 +1,7 @@
 // api/proxy.js
-import fetch from 'node-fetch'; 
+// استخدام require بدلاً من import لتفادي مشاكل الـ ESM
 
-export default async (req, res) => {
+module.exports = async (req, res) => {
     // 1. استخراج رابط البث المستهدف
     const targetUrl = req.query.url;
 
@@ -11,10 +11,10 @@ export default async (req, res) => {
     }
 
     try {
-        // 2. إرسال الطلب من خادم Vercel
+        // 2. استخدام دالة fetch العالمية (متاحة في بيئات Vercel الحديثة)
         const response = await fetch(targetUrl, {
             method: 'GET',
-            // 🛡️ 3. إضافة الهيدرات اللازمة لتجاوز حظر 403
+            // 🛡️ 3. إضافة الهيدرات لتجاوز حظر 403
             headers: {
                 'User-Agent': 'VLC/3.0.17 LibVLC/3.0.17',
                 'Referer': 'https://www.google.com/', 
@@ -22,7 +22,7 @@ export default async (req, res) => {
             }
         });
 
-        // 4. تعيين هيدر CORS للسماح لتطبيقك بالوصول إلى الدالة
+        // 4. تعيين هيدرات CORS للسماح بالوصول
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -32,6 +32,7 @@ export default async (req, res) => {
         res.setHeader('Content-Type', response.headers.get('content-type') || 'text/plain');
 
         // 6. إرجاع المحتوى
+        // (Note: response.body.pipe(res) requires the response to be streamable)
         response.body.pipe(res);
 
     } catch (error) {
