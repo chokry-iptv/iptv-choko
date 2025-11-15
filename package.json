@@ -1,0 +1,12 @@
+{
+  "name": "vercel-iptv-proxy",
+  "version": "1.0.0",
+  "description": "Node.js proxy function for IPTV",
+  "main": "api/proxy.js",
+  "dependencies": {
+    "node-fetch": "^2.6.1"
+  },
+  "scripts": {
+    "start": "node api/proxy.js"
+  }
+}
